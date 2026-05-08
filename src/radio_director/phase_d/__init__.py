@@ -18,6 +18,7 @@ from radio_director.phase_d.number_extractor import (
     extract_numbers,
     is_highly_specific,
 )
+from radio_director.phase_d.verifier import verify
 
 __all__ = [
     "ExtractedNumber",
@@ -32,4 +33,5 @@ __all__ = [
     "MetadataGenerationError",
     "build_chapters",
     "generate_metadata",
+    "verify",
 ]
