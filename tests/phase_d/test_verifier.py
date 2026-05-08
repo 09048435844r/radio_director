@@ -1,0 +1,123 @@
+"""verifier (オーケストレーション) の end-to-end ユニット。"""
+
+from __future__ import annotations
+
+import json
+
+from radio_director.phase_b.llm_client import LLMClient
+from radio_director.phase_d.verifier import verify
+
+from tests.phase_d._factories import (
+    make_cleaned_research,
+    make_script,
+    make_segment,
+)
+
+
+class FakeLLMClient(LLMClient):
+    def __init__(self, response: str):
+        self.response = response
+        self.calls = 0
+
+    def generate(self, prompt, *, temperature=0.5, max_tokens=1024, json_mode=True):
+        self.calls += 1
+        return self.response
+
+
+_METADATA_RESPONSE = json.dumps(
+    {
+        "title": "テスト動画",
+        "description": "概要." * 30,
+        "hashtags": ["a", "b", "c", "d", "e"],
+    },
+    ensure_ascii=False,
+)
+
+
+def _full_segments_with(deep_dive_0):
+    from tests.phase_d._factories import make_segment as ms
+
+    return [
+        ms(segment_type="intro", topic_index=None, title="i"),
+        deep_dive_0,
+        ms(segment_type="deep_dive", topic_index=1, title="d1"),
+        ms(segment_type="deep_dive", topic_index=2, title="d2"),
+        ms(segment_type="conclusion", topic_index=None, title="c"),
+    ]
+
+
+def test_verify_assembles_verified_script():
+    cleaned = make_cleaned_research()
+    seg = make_segment(
+        segment_type="deep_dive",
+        topic_index=0,
+        title="d0",
+        turn_texts=[
+            ("A", "39.5%は不足のだ [AAA]"),
+            ("B", "2.94倍ですわ [src=1][AAA]"),
+            ("A", "x"),
+            ("B", "y"),
+        ],
+    )
+    script = make_script(segments=_full_segments_with(seg))
+    client = FakeLLMClient(_METADATA_RESPONSE)
+
+    verified = verify(script, cleaned, client=client)
+    assert verified.metadata.title == "テスト動画"
+    assert verified.metrics.total_numbers_extracted >= 2
+    assert verified.metrics.matched_to_structured_facts >= 2
+    assert verified.metrics.citation_tags_total >= 2
+    assert client.calls == 1
+
+
+def test_verify_propagates_unmatched_warnings():
+    cleaned = make_cleaned_research()
+    seg = make_segment(
+        segment_type="deep_dive",
+        topic_index=0,
+        title="d0",
+        turn_texts=[
+            ("A", "999.9% も上昇 [AAA]"),
+            ("B", "ですわ"),
+            ("A", "x"),
+            ("B", "y"),
+        ],
+    )
+    script = make_script(segments=_full_segments_with(seg))
+    client = FakeLLMClient(_METADATA_RESPONSE)
+
+    verified = verify(script, cleaned, client=client)
+    codes = [w.code for w in verified.warnings]
+    assert "unmatched_number" in codes
+
+
+def test_verify_propagates_tier_mismatch():
+    """src=3 (B tier) なのに台本で [src=3][AAA] と書かれている場合。"""
+    cleaned = make_cleaned_research()
+    seg = make_segment(
+        segment_type="deep_dive",
+        topic_index=0,
+        title="d0",
+        turn_texts=[
+            ("A", "事実 [src=3][AAA]"),
+            ("B", "ですわ"),
+            ("A", "x"),
+            ("B", "y"),
+        ],
+    )
+    script = make_script(segments=_full_segments_with(seg))
+    client = FakeLLMClient(_METADATA_RESPONSE)
+
+    verified = verify(script, cleaned, client=client)
+    codes = [w.code for w in verified.warnings]
+    assert "tier_mismatch" in codes
+    assert verified.metrics.citation_tags_inconsistent >= 1
+
+
+def test_verify_metrics_chapter_count():
+    cleaned = make_cleaned_research()
+    script = make_script()
+    client = FakeLLMClient(_METADATA_RESPONSE)
+
+    verified = verify(script, cleaned, client=client)
+    assert len(verified.metadata.chapters) == len(script.segments)
