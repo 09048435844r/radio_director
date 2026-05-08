@@ -33,7 +33,7 @@ def generate_metadata(
     *,
     client: LLMClient | None = None,
     temperature: float = 0.5,
-    max_tokens: int = 1024,
+    max_tokens: int = 2048,
 ) -> VideoMetadata:
     client = client or LLMClient.from_env()
     prompt = _build_prompt(script.show_spec)
