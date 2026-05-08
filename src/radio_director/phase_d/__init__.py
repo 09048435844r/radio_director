@@ -1,3 +1,7 @@
+from radio_director.phase_d.citation_normalizer import (
+    CitationFinding,
+    normalize_citations,
+)
 from radio_director.phase_d.hallucination_detector import (
     HallucinationStats,
     build_fact_index,
@@ -18,4 +22,6 @@ __all__ = [
     "build_fact_index",
     "check_needs_review_usage",
     "detect_hallucinations",
+    "CitationFinding",
+    "normalize_citations",
 ]
