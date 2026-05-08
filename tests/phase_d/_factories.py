@@ -39,6 +39,7 @@ def make_show_spec(*, n_topics: int = 3) -> ShowSpec:
     return ShowSpec.model_validate(
         {
             "title": "テスト番組",
+            "thumbnail_title": "テスト番組",
             "hook": "視聴者のフック",
             "angle": "切り口",
             "arc": "導入→深掘り→まとめ",

@@ -65,3 +65,28 @@ def test_extra_top_level_fields_ignored():
     payload["bogus_field"] = "abc"
     show = ShowSpec.model_validate(payload)
     assert not hasattr(show, "bogus_field")
+
+
+def test_thumbnail_title_boundary_15_chars_ok():
+    payload = make_show_spec(thumbnail_title="あいうえおかきくけこさしすせそ")  # 15 chars
+    show = ShowSpec.model_validate(payload)
+    assert show.thumbnail_title == "あいうえおかきくけこさしすせそ"
+
+
+def test_thumbnail_title_16_chars_raises():
+    payload = make_show_spec(thumbnail_title="あいうえおかきくけこさしすせそた")  # 16 chars
+    with pytest.raises(ValidationError):
+        ShowSpec.model_validate(payload)
+
+
+def test_thumbnail_title_empty_raises():
+    payload = make_show_spec(thumbnail_title="")
+    with pytest.raises(ValidationError):
+        ShowSpec.model_validate(payload)
+
+
+def test_thumbnail_title_missing_raises():
+    payload = make_show_spec()
+    payload.pop("thumbnail_title")
+    with pytest.raises(ValidationError):
+        ShowSpec.model_validate(payload)

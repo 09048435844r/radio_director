@@ -31,6 +31,7 @@ def make_topic(**overrides: Any) -> dict[str, Any]:
 def make_show_spec(**overrides: Any) -> dict[str, Any]:
     base = {
         "title": "寝不足が免疫を壊す？",
+        "thumbnail_title": "免疫崩壊の真実",
         "hook": "今夜の睡眠が来週の風邪を決める",
         "angle": "寝不足が『風邪』を呼ぶ",
         "arc": "導入→深掘り→まとめ",

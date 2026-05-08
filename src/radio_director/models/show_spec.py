@@ -31,6 +31,7 @@ class ShowSpec(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     title: str
+    thumbnail_title: str = Field(..., min_length=1, max_length=15)
     hook: str
     angle: str
     arc: str
