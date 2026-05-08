@@ -117,6 +117,158 @@ def test_strips_think_tags_in_response():
     assert md.title
 
 
+def test_references_empty_when_no_findings_provided():
+    """citation_findings 未指定時は references=[] (後方互換)。"""
+    script = make_script()
+    client = FakeLLMClient(_VALID_PAYLOAD)
+    md = generate_metadata(script, client=client)
+    assert md.references == []
+
+
+def test_references_resolved_from_citation_findings():
+    """is_consistent=True の source_idx のみが SourceRef にマップされる。"""
+    from radio_director.phase_d.citation_normalizer import CitationFinding
+    from tests.phase_d._factories import make_cleaned_research
+
+    cleaned = make_cleaned_research()  # 3 sources: AAA / AAA / B
+    findings = [
+        CitationFinding(
+            raw="[src=1][AAA]",
+            canonical="[src=1][AAA]",
+            source_idx=1,
+            tier="AAA",
+            is_consistent=True,
+            location="deep_dive_0",
+        ),
+        CitationFinding(
+            raw="[src=3][B]",
+            canonical="[src=3][B]",
+            source_idx=3,
+            tier="B",
+            is_consistent=True,
+            location="deep_dive_1",
+        ),
+    ]
+    script = make_script()
+    client = FakeLLMClient(_VALID_PAYLOAD)
+    md = generate_metadata(
+        script, cleaned, findings, client=client
+    )
+    assert len(md.references) == 2
+    assert md.references[0].tier == "AAA"
+    assert md.references[1].tier == "B"
+
+
+def test_references_dedup_by_url():
+    """同じ source_idx を複数回引用しても references には 1 件のみ。"""
+    from radio_director.phase_d.citation_normalizer import CitationFinding
+    from tests.phase_d._factories import make_cleaned_research
+
+    cleaned = make_cleaned_research()
+    findings = [
+        CitationFinding(
+            raw="[src=1][AAA]", canonical="[src=1][AAA]", source_idx=1,
+            tier="AAA", is_consistent=True, location="deep_dive_0",
+        ),
+        CitationFinding(
+            raw="[src=1][AAA]", canonical="[src=1][AAA]", source_idx=1,
+            tier="AAA", is_consistent=True, location="deep_dive_1",
+        ),
+    ]
+    script = make_script()
+    client = FakeLLMClient(_VALID_PAYLOAD)
+    md = generate_metadata(script, cleaned, findings, client=client)
+    assert len(md.references) == 1
+
+
+def test_references_skip_inconsistent_findings():
+    """is_consistent=False (tier_mismatch / unknown_source_idx) は無視。"""
+    from radio_director.phase_d.citation_normalizer import CitationFinding
+    from tests.phase_d._factories import make_cleaned_research
+
+    cleaned = make_cleaned_research()
+    findings = [
+        CitationFinding(
+            raw="[src=1][AAA]", canonical="[src=1][AAA]", source_idx=1,
+            tier="AAA", is_consistent=True, location="deep_dive_0",
+        ),
+        CitationFinding(
+            raw="[src=99][AAA]", canonical="[src=99][AAA]", source_idx=99,
+            tier="AAA", is_consistent=False, location="deep_dive_1",
+        ),
+    ]
+    script = make_script()
+    client = FakeLLMClient(_VALID_PAYLOAD)
+    md = generate_metadata(script, cleaned, findings, client=client)
+    assert len(md.references) == 1
+    assert md.references[0].tier == "AAA"
+
+
+def test_references_skip_tier_only_findings():
+    """source_idx=None の tier-only タグは references 候補にならない。"""
+    from radio_director.phase_d.citation_normalizer import CitationFinding
+    from tests.phase_d._factories import make_cleaned_research
+
+    cleaned = make_cleaned_research()
+    findings = [
+        CitationFinding(
+            raw="[AAA]", canonical="[AAA]", source_idx=None,
+            tier="AAA", is_consistent=True, location="deep_dive_0",
+        ),
+    ]
+    script = make_script()
+    client = FakeLLMClient(_VALID_PAYLOAD)
+    md = generate_metadata(script, cleaned, findings, client=client)
+    assert md.references == []
+
+
+def test_references_zero_findings_yields_empty_list():
+    """findings が空 list でも references=[] で正常完了。"""
+    from tests.phase_d._factories import make_cleaned_research
+
+    cleaned = make_cleaned_research()
+    script = make_script()
+    client = FakeLLMClient(_VALID_PAYLOAD)
+    md = generate_metadata(script, cleaned, [], client=client)
+    assert md.references == []
+
+
+def test_references_invalid_url_skipped():
+    """cleaned_research.sources の URL が不正なら HttpUrl 検証で skip される。"""
+    from radio_director.phase_d.citation_normalizer import CitationFinding
+    from tests.phase_d._factories import make_cleaned_research
+
+    cleaned = make_cleaned_research(
+        sources=[
+            {
+                "title": "bad url",
+                "url": "not-a-url",  # HttpUrl 検証で弾かれる
+                "domain_score": 90,
+                "domain_tier": "AAA",
+            },
+        ],
+    )
+    findings = [
+        CitationFinding(
+            raw="[src=1][AAA]", canonical="[src=1][AAA]", source_idx=1,
+            tier="AAA", is_consistent=True, location="deep_dive_0",
+        ),
+    ]
+    script = make_script()
+    client = FakeLLMClient(_VALID_PAYLOAD)
+    md = generate_metadata(script, cleaned, findings, client=client)
+    assert md.references == []
+
+
+def test_thumbnail_title_propagated_from_show_spec():
+    """ShowSpec.thumbnail_title が VideoMetadata.thumbnail_title に
+    機械的にコピーされる (LLM 経由ではない)。"""
+    script = make_script()
+    client = FakeLLMClient(_VALID_PAYLOAD)
+    md = generate_metadata(script, client=client)
+    assert md.thumbnail_title == script.show_spec.thumbnail_title
+
+
 def test_long_episode_uses_hms_format():
     """1 時間超の chapters が HH:MM:SS 形式になること。"""
     from radio_director.models.script import (
