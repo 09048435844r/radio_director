@@ -51,7 +51,7 @@ class LLMClient:
         prompt: str,
         *,
         temperature: float = 0.5,
-        max_tokens: int = 8192,
+        max_tokens: int = 4096,
         json_mode: bool = True,
     ) -> str:
         payload: dict[str, Any] = {

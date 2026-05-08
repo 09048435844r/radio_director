@@ -19,7 +19,7 @@ def plan_show(
     *,
     client: LLMClient | None = None,
     temperature: float = 0.5,
-    max_tokens: int = 8192,
+    max_tokens: int = 4096,
 ) -> ShowSpec:
     """CleanedResearch から ShowSpec を生成する。
 
