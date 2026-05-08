@@ -1,3 +1,4 @@
+from radio_director.phase_c.conductor import conduct
 from radio_director.phase_c.parser import ScriptParseError, parse_segment
 from radio_director.phase_c.prompt_builder import (
     build_conclusion_prompt,
@@ -13,4 +14,5 @@ __all__ = [
     "ScriptParseError",
     "parse_segment",
     "generate_segment",
+    "conduct",
 ]
