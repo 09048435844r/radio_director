@@ -126,3 +126,17 @@ def test_empty_categories_render_placeholder():
     prompt = build_prompt(cleaned)
     # surprising_claims / controversies は空なのでプレースホルダ
     assert "(該当なし)" in prompt
+
+
+def test_prompt_contains_thumbnail_title_directives():
+    """Step 1 SSOT 化: thumbnail_title 出力指示と JSON schema hint への含有。"""
+    cleaned = _decode(make_brief(key_numbers=[kn(1)] * 5))
+    prompt = build_prompt(cleaned)
+    # 構成要素として明記
+    assert "サムネ用短縮タイトル" in prompt
+    assert "thumbnail_title" in prompt
+    # 重要なルールに 15 字制約と機械的切り詰め禁止
+    assert "15 字以内" in prompt
+    assert "機械的な切り詰め" in prompt or "機械的切り詰め" in prompt
+    # JSON schema hint に "thumbnail_title": キーが含まれる
+    assert '"thumbnail_title"' in prompt
