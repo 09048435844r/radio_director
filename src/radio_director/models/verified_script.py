@@ -13,7 +13,15 @@ from typing import Literal
 from pydantic import BaseModel
 
 from radio_director.models.script import Script
-from radio_director.models.video_metadata import VideoMetadata
+from radio_director.models.video_metadata import SourceRef, VideoMetadata
+
+__all__ = [
+    "WarningCode",
+    "VerificationWarning",
+    "VerifiedScriptMetrics",
+    "VerifiedScript",
+    "SourceRef",
+]
 
 WarningCode = Literal[
     "unmatched_number",

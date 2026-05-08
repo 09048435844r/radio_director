@@ -47,10 +47,12 @@ def generate_metadata(
     parsed = _parse_metadata_response(raw)
 
     chapters = build_chapters(script)
+    thumbnail_title = script.show_spec.thumbnail_title
 
     try:
         return VideoMetadata(
             title=parsed["title"],
+            thumbnail_title=thumbnail_title,
             description=parsed["description"],
             hashtags=_clean_hashtags(parsed["hashtags"]),
             chapters=chapters,
