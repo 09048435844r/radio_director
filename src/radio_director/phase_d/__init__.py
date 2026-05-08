@@ -8,6 +8,11 @@ from radio_director.phase_d.hallucination_detector import (
     check_needs_review_usage,
     detect_hallucinations,
 )
+from radio_director.phase_d.metadata_generator import (
+    MetadataGenerationError,
+    build_chapters,
+    generate_metadata,
+)
 from radio_director.phase_d.number_extractor import (
     ExtractedNumber,
     extract_numbers,
@@ -24,4 +29,7 @@ __all__ = [
     "detect_hallucinations",
     "CitationFinding",
     "normalize_citations",
+    "MetadataGenerationError",
+    "build_chapters",
+    "generate_metadata",
 ]
