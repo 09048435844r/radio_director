@@ -5,11 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "radio_director"
 version = "0.1.0"
-description = "Mac Studio 上のゼロベース台本生成パイプライン (Phase A プロトタイプ)"
+description = "Mac Studio 上のゼロベース台本生成パイプライン (Phase A/B プロトタイプ)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.5",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
