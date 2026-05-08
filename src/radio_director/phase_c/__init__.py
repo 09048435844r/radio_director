@@ -4,6 +4,7 @@ from radio_director.phase_c.prompt_builder import (
     build_deep_dive_prompt,
     build_intro_prompt,
 )
+from radio_director.phase_c.segment_generator import generate_segment
 
 __all__ = [
     "build_intro_prompt",
@@ -11,4 +12,5 @@ __all__ = [
     "build_conclusion_prompt",
     "ScriptParseError",
     "parse_segment",
+    "generate_segment",
 ]
