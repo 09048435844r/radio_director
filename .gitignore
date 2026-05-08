@@ -6,6 +6,6 @@ venv/
 .vscode/
 .idea/
 .DS_Store
-output/
+/output/
 *.log
 .pytest_cache/
