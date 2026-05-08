@@ -11,10 +11,12 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from radio_director.models.cleaned_research import CleanedResearch
 from radio_director.models.script import Script
 from radio_director.models.show_spec import ShowSpec
-from radio_director.models.video_metadata import Chapter, VideoMetadata
+from radio_director.models.video_metadata import Chapter, SourceRef, VideoMetadata
 from radio_director.phase_b.llm_client import LLMClient
+from radio_director.phase_d.citation_normalizer import CitationFinding
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +32,21 @@ class MetadataGenerationError(Exception):
 
 def generate_metadata(
     script: Script,
+    cleaned_research: CleanedResearch | None = None,
+    citation_findings: list[CitationFinding] | None = None,
     *,
     client: LLMClient | None = None,
     temperature: float = 0.5,
     max_tokens: int = 2048,
 ) -> VideoMetadata:
+    """ShowSpec から動画メタデータを生成する。
+
+    title / description / hashtags は LLM 1 コール、chapters は決定論計算、
+    thumbnail_title は ShowSpec から機械的コピー、references は
+    citation_findings (Phase D citation_normalizer の出力) を
+    cleaned_research.sources で解決した SourceRef リスト。
+    LLM コールはメタデータ用の 1 回のみ (Step 1 SSOT 化、Guardrail §3.1)。
+    """
     client = client or LLMClient.from_env()
     prompt = _build_prompt(script.show_spec)
 
@@ -48,6 +60,11 @@ def generate_metadata(
 
     chapters = build_chapters(script)
     thumbnail_title = script.show_spec.thumbnail_title
+    references = (
+        resolve_references(citation_findings, cleaned_research)
+        if citation_findings is not None and cleaned_research is not None
+        else []
+    )
 
     try:
         return VideoMetadata(
@@ -56,11 +73,52 @@ def generate_metadata(
             description=parsed["description"],
             hashtags=_clean_hashtags(parsed["hashtags"]),
             chapters=chapters,
+            references=references,
         )
     except ValidationError as exc:
         raise MetadataGenerationError(
             f"VideoMetadata validation failed: {exc}"
         ) from exc
+
+
+def resolve_references(
+    citation_findings: list[CitationFinding],
+    cleaned_research: CleanedResearch,
+) -> list[SourceRef]:
+    """citation_findings から実引用された source_idx を抽出し、
+    cleaned_research.sources からルックアップして SourceRef リストを生成する。
+
+    引用順序を保ち、URL ベースで重複排除する。範囲外 source_idx や
+    is_consistent=False のタグは無視する (verifier 側で別途 warning 発生済)。
+    LLM コールは行わない (Step 1 SSOT 化、Guardrail §3.1)。
+    """
+    used_indices: list[int] = []
+    seen_indices: set[int] = set()
+    for f in citation_findings:
+        if f.source_idx is None or not f.is_consistent:
+            continue
+        if f.source_idx in seen_indices:
+            continue
+        seen_indices.add(f.source_idx)
+        used_indices.append(f.source_idx)
+
+    refs: list[SourceRef] = []
+    seen_urls: set[str] = set()
+    sources = cleaned_research.sources
+    for idx in used_indices:
+        if idx < 1 or idx > len(sources):
+            continue
+        src = sources[idx - 1]
+        url = (src.url or "").strip()
+        if not url or url in seen_urls:
+            continue
+        try:
+            ref = SourceRef(url=url, title=src.title, tier=src.domain_tier)
+        except ValidationError:
+            continue
+        seen_urls.add(url)
+        refs.append(ref)
+    return refs
 
 
 def build_chapters(script: Script) -> list[Chapter]:

@@ -45,7 +45,12 @@ def verify(
 
     citation_findings, citation_warnings = normalize_citations(script, cleaned_research)
 
-    metadata = generate_metadata(script, client=client)
+    metadata = generate_metadata(
+        script,
+        cleaned_research,
+        citation_findings,
+        client=client,
+    )
 
     metrics = VerifiedScriptMetrics(
         total_numbers_extracted=halluc_stats.total,
