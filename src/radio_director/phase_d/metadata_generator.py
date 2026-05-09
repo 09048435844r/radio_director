@@ -37,7 +37,7 @@ def generate_metadata(
     *,
     client: LLMClient | None = None,
     temperature: float = 0.5,
-    max_tokens: int = 2048,
+    max_tokens: int = 4096,
 ) -> VideoMetadata:
     """ShowSpec から動画メタデータを生成する。
 
