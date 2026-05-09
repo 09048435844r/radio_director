@@ -70,7 +70,7 @@ def generate_segment(
         except (LLMRequestError, ScriptParseError) as exc:
             last_exc = exc
             logger.warning(
-                "segment %s/%s attempt %d/%d failed: %s",
+                "⚠️ segment %s/%s attempt %d/%d failed: %s",
                 segment_type,
                 topic_index,
                 attempt,
@@ -81,7 +81,7 @@ def generate_segment(
                 time.sleep(2 ** (attempt - 1))
 
     logger.error(
-        "segment %s/%s falling back to template after %d attempts (last error: %s)",
+        "❌ segment %s/%s fallback テンプレート適用 (max_attempts=%d, last error: %s)",
         segment_type,
         topic_index,
         max_attempts,

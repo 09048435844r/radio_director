@@ -43,6 +43,7 @@ def conduct(
 
     parallel_results: dict[tuple[str, int | None], tuple[ScriptSegment, SegmentMetrics]] = {}
 
+    parallel_total = 1 + n_topics
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {
@@ -59,20 +60,36 @@ def conduct(
             ): (stype, tidx)
             for stype, tidx in parallel_specs
         }
+        done = 0
         for fut in as_completed(futures):
             key = futures[fut]
-            parallel_results[key] = fut.result()
+            seg, m = fut.result()
+            parallel_results[key] = (seg, m)
+            done += 1
+            stype, tidx = key
+            label = "intro" if stype == "intro" else f"deep_dive[{tidx}]"
+            logger.info(
+                "🧩 segment %s 完了 (%d/%d): chars=%d attempts=%d%s elapsed=%.1fs",
+                label,
+                done,
+                parallel_total,
+                m.output_chars,
+                m.attempts,
+                " [fallback]" if m.used_fallback else "",
+                m.elapsed_sec,
+            )
 
     intro_seg, intro_m = parallel_results[("intro", None)]
     deep_results = [parallel_results[("deep_dive", i)] for i in range(n_topics)]
 
     parallel_elapsed = time.monotonic() - started
     logger.info(
-        "Phase C parallel done: %d segments in %.1fs",
-        1 + n_topics,
+        "✅ Phase C 並列フェーズ完了: %d segments elapsed=%.1fs",
+        parallel_total,
         parallel_elapsed,
     )
 
+    logger.info("🎬 Phase C: conclusion 生成中 (intro+%d topics 完了後)", n_topics)
     conc_seg, conc_m = generate_segment(
         segment_type="conclusion",
         topic_index=None,
@@ -83,9 +100,16 @@ def conduct(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    logger.info(
+        "🧩 segment conclusion 完了: chars=%d attempts=%d%s elapsed=%.1fs",
+        conc_m.output_chars,
+        conc_m.attempts,
+        " [fallback]" if conc_m.used_fallback else "",
+        conc_m.elapsed_sec,
+    )
 
     total_elapsed = time.monotonic() - started
-    logger.info("Phase C total elapsed: %.1fs", total_elapsed)
+    logger.info("🎬 Phase C total elapsed=%.1fs", total_elapsed)
 
     segments = [intro_seg, *(s for s, _ in deep_results), conc_seg]
     metrics: dict[str, SegmentMetrics] = {

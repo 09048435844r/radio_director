@@ -7,6 +7,8 @@ needs_review フラグを付与する。
 
 from __future__ import annotations
 
+import logging
+
 from radio_director.models.cleaned_research import (
     CleanedFacts,
     CleanedResearch,
@@ -21,6 +23,8 @@ from radio_director.models.research_brief import (
     SurprisingClaim,
 )
 from radio_director.phase_a.quality_gate import run_quality_gate
+
+logger = logging.getLogger(__name__)
 
 _FACT_TYPES = (KeyNumber, KeyEntity, SurprisingClaim)
 _AnyFact = KeyNumber | KeyEntity | SurprisingClaim
@@ -47,6 +51,12 @@ def decode(brief: ResearchBrief) -> CleanedResearch:
     )
 
     quality = run_quality_gate(brief, cleaned_facts)
+
+    _MAX_WARNING_LINES = 10
+    for w in quality.warnings[:_MAX_WARNING_LINES]:
+        logger.warning("⚠️ Phase A 品質警告 [%s]: %s", w.code, w.message)
+    if len(quality.warnings) > _MAX_WARNING_LINES:
+        logger.warning("⚠️ ... 他 %d 件", len(quality.warnings) - _MAX_WARNING_LINES)
 
     return CleanedResearch(
         theme=brief.theme,

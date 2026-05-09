@@ -51,8 +51,8 @@ def plan_show(
         elapsed = time.monotonic() - started
 
         logger.info(
-            "Phase B attempt %d/%d: prompt_chars=%d output_chars=%d "
-            "approx_prompt_tokens=%d approx_output_tokens=%d elapsed_sec=%.1f",
+            "📝 Phase B attempt %d/%d: prompt_chars=%d output_chars=%d "
+            "approx_prompt_tokens=%d approx_output_tokens=%d elapsed=%.1fs",
             attempt,
             max_attempts,
             len(prompt),
@@ -67,7 +67,7 @@ def plan_show(
         except ShowSpecParseError as exc:
             last_exc = exc
             logger.warning(
-                "Phase B attempt %d/%d failed: %s",
+                "⚠️ Phase B attempt %d/%d failed: %s",
                 attempt,
                 max_attempts,
                 exc,

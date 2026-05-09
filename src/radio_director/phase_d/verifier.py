@@ -72,6 +72,32 @@ def verify(
     )
 
     logger.info(
+        "🔍 Phase D 数値検証: numbers=%d matched=%d ratio=%.2f",
+        metrics.total_numbers_extracted,
+        metrics.matched_to_structured_facts,
+        metrics.matched_ratio,
+    )
+    logger.info(
+        "🔍 Phase D 高特異度: total=%d unmatched=%d (false-positive 候補)",
+        metrics.highly_specific_count,
+        metrics.highly_specific_unmatched,
+    )
+    logger.info(
+        "🔍 Phase D 引用タグ: total=%d normalized=%d inconsistent=%d",
+        metrics.citation_tags_total,
+        metrics.citation_tags_normalized,
+        metrics.citation_tags_inconsistent,
+    )
+
+    _MAX_WARNING_LINES = 10
+    if warnings:
+        logger.info("⚠️ Phase D warnings: %d 件", len(warnings))
+        for w in warnings[:_MAX_WARNING_LINES]:
+            logger.warning("⚠️ [%s @ %s] %s", w.code, w.location, w.message)
+        if len(warnings) > _MAX_WARNING_LINES:
+            logger.warning("⚠️ ... 他 %d 件", len(warnings) - _MAX_WARNING_LINES)
+
+    logger.info(
         "Phase D verify done: numbers=%d matched=%d (ratio=%.2f) "
         "highly_specific=%d (unmatched=%d) citations=%d (inconsistent=%d) warnings=%d",
         metrics.total_numbers_extracted,

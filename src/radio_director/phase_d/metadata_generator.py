@@ -50,6 +50,10 @@ def generate_metadata(
     client = client or LLMClient.from_env()
     prompt = _build_prompt(script.show_spec)
 
+    logger.info(
+        "📝 Phase D メタデータ LLM 呼び出し中 (prompt_chars=%d)",
+        len(prompt),
+    )
     raw = client.generate(
         prompt,
         temperature=temperature,
@@ -57,6 +61,11 @@ def generate_metadata(
         json_mode=True,
     )
     parsed = _parse_metadata_response(raw)
+    logger.info(
+        "✅ Phase D メタデータ生成完了: title=「%s」 hashtags=%d",
+        str(parsed.get("title", ""))[:30],
+        len(parsed.get("hashtags", []) or []),
+    )
 
     chapters = build_chapters(script)
     thumbnail_title = script.show_spec.thumbnail_title

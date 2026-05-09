@@ -8,6 +8,7 @@ research_brief.json を入力に Phase A→B→C→D を直列実行し、
   verified_script.json      (★ Windows 側がコピーする SSOT)
   run_metadata.json         (実行時刻・phase 別 token 概算)
   phase_logs/               (各 phase の raw ログ用ディレクトリ)
+  phase_logs/run.log        (本 runner の進捗ログ複製、attach_file_handler)
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from radio_director.logging_setup import attach_file_handler, configure_logging
 from radio_director.models.research_brief import ResearchBrief
 from radio_director.output import (
     DEFAULT_OUTPUT_ROOT,
@@ -52,6 +54,8 @@ def run_pipeline(
     Returns:
         作成された run_dir のパス (output_root/<run_id>/ または衝突時 _2/_3)
     """
+    configure_logging()
+
     started_at = datetime.now()
     started_mono = time.monotonic()
 
@@ -59,34 +63,83 @@ def run_pipeline(
     brief = ResearchBrief.model_validate_json(brief_text)
     run_id = build_run_id(brief.theme, now=started_at)
     writer = OutputWriter(run_id, root=output_root)
-    logger.info("runner: run_id=%s run_dir=%s", run_id, writer.run_dir)
+    attach_file_handler(writer.run_dir)
+
+    logger.info("🚀 radio_director パイプライン開始: %s", brief.theme[:50])
+    logger.info("   run_id: %s", run_id)
+    logger.info(
+        "   research_mode: %s / angle: %s",
+        brief.research_mode,
+        brief.angle[:40],
+    )
+    logger.info("   run_dir: %s", writer.run_dir)
 
     client = client or LLMClient.from_env()
 
     # Phase A
+    logger.info("─── Phase A: DECODE ─────────────────────────")
     phase_a_start = time.monotonic()
     cleaned = decode(brief)
     phase_a_elapsed = time.monotonic() - phase_a_start
     writer.save_json("cleaned_research.json", cleaned)
+    logger.info(
+        "✅ Phase A 完了: key_numbers=%d key_entities=%d surprising=%d "
+        "sources=%d quality=%s warnings=%d elapsed=%.1fs",
+        len(cleaned.facts.key_numbers),
+        len(cleaned.facts.key_entities),
+        len(cleaned.facts.surprising_claims),
+        len(cleaned.sources),
+        cleaned.quality_report.overall_quality,
+        len(cleaned.quality_report.warnings),
+        phase_a_elapsed,
+    )
 
     # Phase B
+    logger.info("─── Phase B: PLAN (ShowSpec) ────────────────")
     phase_b_prompt = _build_phase_b_prompt(cleaned)
     phase_b_start = time.monotonic()
     show_spec = plan_show(cleaned, client=client)
     phase_b_elapsed = time.monotonic() - phase_b_start
     writer.save_json("show_spec.json", show_spec)
+    logger.info(
+        "✅ Phase B 完了: title=「%s」 topics=%d elapsed=%.1fs",
+        show_spec.title[:30],
+        len(show_spec.topics),
+        phase_b_elapsed,
+    )
 
     # Phase C
+    logger.info("─── Phase C: CONDUCT (segments) ─────────────")
     phase_c_start = time.monotonic()
     script = conduct(show_spec, client=client)
     phase_c_elapsed = time.monotonic() - phase_c_start
+    total_chars = sum(len(t.text) for s in script.segments for t in s.turns)
+    fallback_count = sum(1 for m in script.metrics.values() if m.used_fallback)
+    logger.info(
+        "✅ Phase C 完了: segments=%d total_chars=%d fallbacks=%d elapsed=%.1fs",
+        len(script.segments),
+        total_chars,
+        fallback_count,
+        phase_c_elapsed,
+    )
 
     # Phase D
+    logger.info("─── Phase D: VERIFY (script + metadata) ─────")
     phase_d_prompt = _build_phase_d_prompt(show_spec)
     phase_d_start = time.monotonic()
     verified = verify(script, cleaned, client=client)
     phase_d_elapsed = time.monotonic() - phase_d_start
     writer.save_json("verified_script.json", verified)
+    logger.info(
+        "✅ Phase D 完了: title=「%s」 hashtags=%d chapters=%d "
+        "references=%d warnings=%d elapsed=%.1fs",
+        verified.metadata.title[:30],
+        len(verified.metadata.hashtags),
+        len(verified.metadata.chapters),
+        len(verified.metadata.references),
+        len(verified.warnings),
+        phase_d_elapsed,
+    )
 
     completed_at = datetime.now()
 
@@ -135,6 +188,30 @@ def run_pipeline(
     )
 
     total_elapsed = time.monotonic() - started_mono
+    minutes, seconds = divmod(int(total_elapsed), 60)
+    logger.info(
+        "✅ パイプライン完了 (所要時間: %d分%d秒) elapsed=%.1fs",
+        minutes,
+        seconds,
+        total_elapsed,
+    )
+    logger.info("━" * 50)
+    logger.info("📊 サマリー:")
+    logger.info("   theme            : %s", brief.theme[:50])
+    logger.info("   run_id           : %s", run_id)
+    logger.info("   segments         : %d 件", len(script.segments))
+    logger.info("   total_chars      : %s 文字", f"{total_chars:,}")
+    logger.info("   warnings         : %d 件", len(verified.warnings))
+    logger.info(
+        "   phase_a/b/c/d    : %.1fs / %.1fs / %.1fs / %.1fs",
+        phase_a_elapsed,
+        phase_b_elapsed,
+        phase_c_elapsed,
+        phase_d_elapsed,
+    )
+    logger.info("   所要時間         : %d分%d秒", minutes, seconds)
+    logger.info("   出力ディレクトリ : %s", writer.run_dir)
+    logger.info("━" * 50)
     logger.info(
         "runner: complete run_id=%s total_elapsed_sec=%.1f phases=A:%.1f B:%.1f C:%.1f D:%.1f",
         run_id,
