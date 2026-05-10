@@ -20,6 +20,7 @@ from radio_director.models.verified_script import (
     VerifiedScriptMetrics,
 )
 from radio_director.phase_b.llm_client import LLMClient
+from radio_director.phase_d.character_validator import check_character_voice
 from radio_director.phase_d.citation_normalizer import normalize_citations
 from radio_director.phase_d.hallucination_detector import (
     build_fact_index,
@@ -44,6 +45,7 @@ def verify(
     needs_review_warnings = check_needs_review_usage(script, cleaned_research)
 
     citation_findings, citation_warnings = normalize_citations(script, cleaned_research)
+    character_warnings = check_character_voice(script)
 
     metadata = generate_metadata(
         script,
@@ -68,7 +70,10 @@ def verify(
         ),
     )
     warnings: list[VerificationWarning] = (
-        halluc_warnings + needs_review_warnings + citation_warnings
+        halluc_warnings
+        + needs_review_warnings
+        + citation_warnings
+        + character_warnings
     )
 
     logger.info(

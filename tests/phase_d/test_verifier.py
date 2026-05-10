@@ -121,3 +121,25 @@ def test_verify_metrics_chapter_count():
 
     verified = verify(script, cleaned, client=client)
     assert len(verified.metadata.chapters) == len(script.segments)
+
+
+def test_verify_propagates_character_warnings():
+    """backlog §8: speaker=B が「のだ」語尾を使った場合、verify() の集約 warnings に含まれる。"""
+    cleaned = make_cleaned_research()
+    seg = make_segment(
+        segment_type="deep_dive",
+        topic_index=0,
+        title="d0",
+        turn_texts=[
+            ("A", "驚きなのだ"),
+            ("B", "それは興味深いのだ"),  # 致命的: B が A 語尾
+            ("A", "x"),
+            ("B", "y"),
+        ],
+    )
+    script = make_script(segments=_full_segments_with(seg))
+    client = FakeLLMClient(_METADATA_RESPONSE)
+
+    verified = verify(script, cleaned, client=client)
+    codes = [w.code for w in verified.warnings]
+    assert "wrong_speaker_voice" in codes

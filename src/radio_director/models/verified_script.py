@@ -30,6 +30,8 @@ WarningCode = Literal[
     "unknown_source_idx",
     "low_match_ratio",
     "needs_review_used",
+    "wrong_speaker_voice",
+    "character_name_corruption",
 ]
 
 
