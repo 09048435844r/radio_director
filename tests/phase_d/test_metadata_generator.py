@@ -322,3 +322,65 @@ def test_long_episode_uses_hms_format():
     assert ":" in chapters[1].timestamp
     h, m, s = chapters[1].timestamp.split(":")
     assert int(h) >= 1
+
+
+# ---------------------------------------------------------------------------
+# retry 動作テスト (max_attempts=2、Phase B 形式の inline retry)
+# ---------------------------------------------------------------------------
+
+
+class _SequentialMockClient(LLMClient):
+    """呼び出し順に異なる response を返す mock client。
+
+    retry テスト用: 1 回目に broken response、2 回目に正常 response を
+    返して retry の recovery 経路を検証する。
+    """
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = 0
+
+    def generate(self, prompt, *, temperature=0.5, max_tokens=1024, json_mode=True):
+        idx = min(self.calls, len(self.responses) - 1)
+        self.calls += 1
+        return self.responses[idx]
+
+
+_INVALID_TITLE_TYPE_PAYLOAD = json.dumps(
+    {
+        "title": 500,  # int を返す本番再発バグ (2026-05-10)
+        "description": "本番で観測された title 型不安定の再現。"
+        + "retry で正常 response に切り替わって成功するシナリオ。" * 3,
+        "hashtags": ["睡眠", "免疫", "健康", "科学", "ラジオ"],
+    },
+    ensure_ascii=False,
+)
+
+_BROKEN_JSON_PAYLOAD = "これは JSON じゃない、{ 構文も壊れてる"
+
+
+def test_retry_recovers_from_invalid_title_type():
+    """1 回目に title=int (本番再現)、2 回目に正常 → 成功。"""
+    script = make_script()
+    client = _SequentialMockClient([_INVALID_TITLE_TYPE_PAYLOAD, _VALID_PAYLOAD])
+    md = generate_metadata(script, client=client)
+    assert md.title == "睡眠と免疫の最新科学"
+    assert client.calls == 2
+
+
+def test_retry_recovers_from_json_parse_error():
+    """1 回目に broken JSON、2 回目に正常 → 成功。"""
+    script = make_script()
+    client = _SequentialMockClient([_BROKEN_JSON_PAYLOAD, _VALID_PAYLOAD])
+    md = generate_metadata(script, client=client)
+    assert md.title == "睡眠と免疫の最新科学"
+    assert client.calls == 2
+
+
+def test_retry_exhausts_and_raises():
+    """2 回とも broken → MetadataGenerationError 伝播 (現状動作の保持)。"""
+    script = make_script()
+    client = _SequentialMockClient([_BROKEN_JSON_PAYLOAD, _BROKEN_JSON_PAYLOAD])
+    with pytest.raises(MetadataGenerationError):
+        generate_metadata(script, client=client)
+    assert client.calls == 2

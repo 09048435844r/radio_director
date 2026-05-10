@@ -38,6 +38,7 @@ def generate_metadata(
     client: LLMClient | None = None,
     temperature: float = 0.5,
     max_tokens: int = 4096,
+    max_attempts: int = 2,
 ) -> VideoMetadata:
     """ShowSpec から動画メタデータを生成する。
 
@@ -46,26 +47,13 @@ def generate_metadata(
     citation_findings (Phase D citation_normalizer の出力) を
     cleaned_research.sources で解決した SourceRef リスト。
     LLM コールはメタデータ用の 1 回のみ (Step 1 SSOT 化、Guardrail §3.1)。
+
+    LLM 出力の型不安定 (例: title が int で返る) を吸収するため
+    max_attempts=2 の inline retry を持つ (Phase B planner と同形式)。
+    retry は同一プロンプトの再呼び出しで、新たな LLM 経路は追加しない。
     """
     client = client or LLMClient.from_env()
     prompt = _build_prompt(script.show_spec)
-
-    logger.info(
-        "📝 Phase D メタデータ LLM 呼び出し中 (prompt_chars=%d)",
-        len(prompt),
-    )
-    raw = client.generate(
-        prompt,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        json_mode=True,
-    )
-    parsed = _parse_metadata_response(raw)
-    logger.info(
-        "✅ Phase D メタデータ生成完了: title=「%s」 hashtags=%d",
-        str(parsed.get("title", ""))[:30],
-        len(parsed.get("hashtags", []) or []),
-    )
 
     chapters = build_chapters(script)
     thumbnail_title = script.show_spec.thumbnail_title
@@ -75,19 +63,54 @@ def generate_metadata(
         else []
     )
 
-    try:
-        return VideoMetadata(
-            title=parsed["title"],
-            thumbnail_title=thumbnail_title,
-            description=parsed["description"],
-            hashtags=_clean_hashtags(parsed["hashtags"]),
-            chapters=chapters,
-            references=references,
+    last_exc: MetadataGenerationError | None = None
+    for attempt in range(1, max_attempts + 1):
+        logger.info(
+            "📝 Phase D メタデータ LLM 呼び出し中 attempt %d/%d (prompt_chars=%d)",
+            attempt,
+            max_attempts,
+            len(prompt),
         )
-    except ValidationError as exc:
-        raise MetadataGenerationError(
-            f"VideoMetadata validation failed: {exc}"
-        ) from exc
+        raw = client.generate(
+            prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=True,
+        )
+        try:
+            parsed = _parse_metadata_response(raw)
+            try:
+                md = VideoMetadata(
+                    title=parsed["title"],
+                    thumbnail_title=thumbnail_title,
+                    description=parsed["description"],
+                    hashtags=_clean_hashtags(parsed["hashtags"]),
+                    chapters=chapters,
+                    references=references,
+                )
+            except ValidationError as exc:
+                raise MetadataGenerationError(
+                    f"VideoMetadata validation failed: {exc}"
+                ) from exc
+        except MetadataGenerationError as exc:
+            last_exc = exc
+            logger.warning(
+                "⚠️ Phase D attempt %d/%d failed: %s",
+                attempt,
+                max_attempts,
+                exc,
+            )
+            continue
+
+        logger.info(
+            "✅ Phase D メタデータ生成完了: title=「%s」 hashtags=%d",
+            md.title[:30],
+            len(md.hashtags),
+        )
+        return md
+
+    assert last_exc is not None
+    raise last_exc
 
 
 def resolve_references(
@@ -177,15 +200,24 @@ arc: {show_spec.arc}
 conclusion_message: {show_spec.conclusion_message}
 
 # 出力ルール
-- title: 60 字以内、検索でクリックされやすい表現
+- title: **必ず JSON string** として 60 字以内、検索でクリックされやすい表現。
+  数値・配列・null で返してはならない。
 - description: 200-500 字、概要 + 各トピックの一行紹介
-- hashtags: 5-10 個、日本語/英語混在可、頭の # は付けない
+- hashtags: 5-10 個の **string 配列**、日本語/英語混在可、頭の # は付けない
 
 # 出力フォーマット (JSON、以下のスキーマに厳密に従うこと)
+# 注意: title / description は必ず JSON string、hashtags は string の配列。
 {{
   "title": "...",
   "description": "...",
   "hashtags": ["タグ1", "タグ2"]
+}}
+
+# 良い出力例
+{{
+  "title": "〇〇が△△に与える影響？最新□□データの衝撃",
+  "description": "〇〇が△△に及ぼす具体的な影響を、最新研究データを交えて解説。3 つの観点から掘り下げ、明日から使える実践情報まで紹介します。",
+  "hashtags": ["タグ1", "タグ2", "タグ3", "タグ4", "タグ5"]
 }}
 """
 
