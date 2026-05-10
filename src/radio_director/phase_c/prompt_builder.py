@@ -60,8 +60,13 @@ tone: {show_spec.tone}
     return _HEADER + body + _FOOTER
 
 
-def build_deep_dive_prompt(show_spec: ShowSpec, topic_index: int) -> str:
+def build_deep_dive_prompt(
+    show_spec: ShowSpec,
+    topic_index: int,
+    prior_segments: list[ScriptSegment] | None = None,
+) -> str:
     topic = show_spec.topics[topic_index]
+    prior_block = _format_prior_block(prior_segments or [])
     body = f"""
 # あなたの仕事
 トピック「{topic.title}」を A と B の対話で深掘りしてください（7-8 分相当）。
@@ -69,6 +74,7 @@ def build_deep_dive_prompt(show_spec: ShowSpec, topic_index: int) -> str:
 - 提供された key_claims を必ず引用する（出典タグ付き）
 - トピックのトーン: {topic.tone}
 - {topic.estimated_turns} ターン前後を目安に、12-18 ターンの範囲で
+- これまでの台本の流れを踏まえ、自然なブリッジから入る（同じ話題の繰り返しを避ける）
 
 # 番組コンテキスト
 title: {show_spec.title}
@@ -81,13 +87,14 @@ tone: {topic.tone}
 
 # key_claims (引用は必ずここから)
 {_format_claims(topic)}
-"""
+{prior_block}"""
     return _HEADER + body + _FOOTER
 
 
 def build_conclusion_prompt(
     show_spec: ShowSpec, prior_segments: list[ScriptSegment]
 ) -> str:
+    prior_block = _format_prior_block(prior_segments or [])
     body = f"""
 # あなたの仕事
 番組のまとめ（最後の 2 分）を A と B の対話で書いてください。
@@ -100,10 +107,7 @@ def build_conclusion_prompt(
 title: {show_spec.title}
 angle: {show_spec.angle}
 conclusion_message: {show_spec.conclusion_message}
-
-# これまでの台本（要約として参照、引用元にはしない）
-{_format_prior_summary(prior_segments)}
-"""
+{prior_block}"""
     return _HEADER + body + _FOOTER
 
 
@@ -116,7 +120,13 @@ def _format_claims(topic: TopicSpec) -> str:
     )
 
 
-def _format_prior_summary(prior_segments: list[ScriptSegment]) -> str:
+def _format_prior_segments(prior_segments: list[ScriptSegment]) -> str:
+    """前 segment の **全 turn** をラベル付きで連結。
+
+    完全 sequential 化 (backlog §6) のため、各 segment は前段の実テキストを
+    full text で受け取る。32K context 上限に対し v1 規模 (~7500 chars) では
+    十分な余裕がある (radio_director_design.md §13.6 max_tokens 決定指針)。
+    """
     blocks: list[str] = []
     for seg in prior_segments:
         if seg.segment_type == "intro":
@@ -125,7 +135,17 @@ def _format_prior_summary(prior_segments: list[ScriptSegment]) -> str:
             label = f"[topic {(seg.topic_index or 0) + 1}: {seg.title}]"
         else:
             label = f"[{seg.segment_type}]"
-        excerpt_turns = seg.turns[:4]
-        excerpt = "\n".join(f"  {t.speaker}: {t.text}" for t in excerpt_turns)
-        blocks.append(f"{label}\n{excerpt}")
+        body = "\n".join(f"  {t.speaker}: {t.text}" for t in seg.turns)
+        blocks.append(f"{label}\n{body}")
     return "\n\n".join(blocks)
+
+
+def _format_prior_block(prior_segments: list[ScriptSegment]) -> str:
+    """prior_segments がある場合に「これまでの台本」ブロックを返す。空ならパディング無し。"""
+    if not prior_segments:
+        return ""
+    return (
+        "\n# これまでの台本（流れを踏まえる参考、引用元にはしない）\n"
+        + _format_prior_segments(prior_segments)
+        + "\n"
+    )

@@ -108,7 +108,7 @@ def _build_prompt(
     if segment_type == "deep_dive":
         if topic_index is None:
             raise ValueError("deep_dive には topic_index が必要です")
-        return build_deep_dive_prompt(show_spec, topic_index)
+        return build_deep_dive_prompt(show_spec, topic_index, prior_segments or [])
     if segment_type == "conclusion":
         return build_conclusion_prompt(show_spec, prior_segments or [])
     raise ValueError(f"unknown segment_type: {segment_type}")

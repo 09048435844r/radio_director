@@ -97,7 +97,8 @@ def test_conclusion_prompt_includes_prior_summary():
     assert f"[topic 1: {show.topics[0].title}]" in prompt
 
 
-def test_conclusion_prior_summary_truncates_to_first_4_turns():
+def test_conclusion_prior_includes_full_turns():
+    """backlog §6: 旧 4 ターン truncation 撤廃、全 turn を full text として埋め込む。"""
     show = make_show_spec(n_topics=3)
     long_turns = [
         DialogTurn(speaker="A" if i % 2 == 0 else "B", text=f"発話{i}")
@@ -107,8 +108,70 @@ def test_conclusion_prior_summary_truncates_to_first_4_turns():
         segment_type="intro", title="t", turns=long_turns
     )
     prompt = build_conclusion_prompt(show, [seg])
-    # 発話3 は含まれるが 発話4 以降は含まれない (先頭 4 ターンのみ抜粋)
+    # 旧契約 (4 ターンで打ち切り) を撤廃: 全 20 ターンが prompt に含まれる
     assert "発話0" in prompt
     assert "発話3" in prompt
-    assert "発話4" not in prompt
-    assert "発話19" not in prompt
+    assert "発話4" in prompt
+    assert "発話19" in prompt
+
+
+# ---------------------------------------------------------------------------
+# backlog §6: deep_dive_prompt が prior_segments を full text で受け取る
+# ---------------------------------------------------------------------------
+
+
+def test_deep_dive_prompt_accepts_no_prior_segments():
+    """prior_segments を省略しても従来通り動く (intro 直後等の最初の deep_dive)。"""
+    show = make_show_spec(n_topics=3)
+    prompt = build_deep_dive_prompt(show, topic_index=0)
+    assert _common_directives_present(prompt)
+    assert show.topics[0].title in prompt
+    # prior ブロックは生成されない (section header の有無で判定)
+    assert "# これまでの台本" not in prompt
+    assert "[intro]" not in prompt
+
+
+def test_deep_dive_prompt_includes_prior_full_text():
+    """prior_segments の全 turn を full text で埋め込む (4 ターン制限なし)。"""
+    show = make_show_spec(n_topics=3)
+    intro_seg = ScriptSegment(
+        segment_type="intro",
+        title="イントロ",
+        turns=[
+            DialogTurn(speaker="A", text=f"intro発話{i}") for i in range(10)
+        ]
+        + [DialogTurn(speaker="B", text="締め") for _ in range(2)],
+    )
+    prompt = build_deep_dive_prompt(
+        show, topic_index=1, prior_segments=[intro_seg]
+    )
+    assert _common_directives_present(prompt)
+    assert "[intro]" in prompt
+    # 4 ターン制限なし: 全 12 ターンが含まれる
+    assert "intro発話0" in prompt
+    assert "intro発話9" in prompt
+    # 自然なブリッジ指示が含まれる
+    assert "ブリッジ" in prompt or "繰り返しを避ける" in prompt
+
+
+def test_deep_dive_prompt_accumulates_multiple_priors():
+    """intro + deep_dive_0 を context として渡すと両方が prompt に含まれる。"""
+    show = make_show_spec(n_topics=3)
+    intro_seg = ScriptSegment(
+        segment_type="intro",
+        title="イントロ",
+        turns=[DialogTurn(speaker="A", text="i" + str(i)) for i in range(4)],
+    )
+    dd0_seg = ScriptSegment(
+        segment_type="deep_dive",
+        topic_index=0,
+        title=show.topics[0].title,
+        turns=[DialogTurn(speaker="B", text="d" + str(i)) for i in range(4)],
+    )
+    prompt = build_deep_dive_prompt(
+        show, topic_index=1, prior_segments=[intro_seg, dd0_seg]
+    )
+    assert "[intro]" in prompt
+    assert f"[topic 1: {show.topics[0].title}]" in prompt
+    assert "i0" in prompt
+    assert "d3" in prompt
