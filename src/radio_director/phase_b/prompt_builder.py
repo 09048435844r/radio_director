@@ -12,10 +12,16 @@ soft 制約 (「参考情報は引用元にしない」) を無視して ShowSpe
 転用する事象を観測。research_content を prompt 注入前に正規表現で数値除去
 (`_strip_numbers_for_phase_b`) し、structured_facts のみを数値ソースとする
 よう Phase B プロンプトを明示。年号 (2024年 等) は時系列情報として残す。
+
+C5 (Step 7): ファクトが豊富なテーマで Phase B prompt が 53k chars に達し
+proxy が 400 Bad Request を返す事象を観測 (diabetes2 brief)。
+prompt 組み立て後にサイズチェックし、PHASE_B_PROMPT_CHAR_LIMIT を超える場合
+structured_facts を confidence 優先で上位 K 件に絞り再構築する。
 """
 
 from __future__ import annotations
 
+import logging
 import re
 
 from radio_director import config as _config
@@ -25,6 +31,8 @@ from radio_director.models.cleaned_research import (
     ResolvedFact,
 )
 from radio_director.models.research_brief import Controversy, ResearchSource
+
+logger = logging.getLogger(__name__)
 
 _TEMPLATE = """あなたは経験豊富なラジオ番組ディレクターです。
 
@@ -125,20 +133,74 @@ _JSON_SCHEMA_HINT = """{
 
 
 def build_prompt(cleaned: CleanedResearch) -> str:
+    """Phase B プロンプトを組み立てる。
+
+    C5: prompt サイズが PHASE_B_PROMPT_CHAR_LIMIT を超える場合、
+    structured_facts を confidence 優先で上位 K 件に絞り再構築する。
+    """
     research_content = cleaned.research_content
     placeholder = _config.PHASE_B_STRIP_PLACEHOLDER
     if _config.PHASE_B_STRIP_NUMBERS:
         research_content = _strip_numbers_for_phase_b(
             research_content, placeholder=placeholder
         )
-    return _TEMPLATE.format(
-        theme=cleaned.theme,
-        angle=cleaned.angle,
-        formatted_facts=_format_facts(cleaned.facts),
-        formatted_sources=_format_sources(cleaned.sources),
-        research_content=research_content,
-        strip_placeholder=placeholder,
-        json_schema=_JSON_SCHEMA_HINT,
+
+    def _render(facts: CleanedFacts) -> str:
+        return _TEMPLATE.format(
+            theme=cleaned.theme,
+            angle=cleaned.angle,
+            formatted_facts=_format_facts(facts),
+            formatted_sources=_format_sources(cleaned.sources),
+            research_content=research_content,
+            strip_placeholder=placeholder,
+            json_schema=_JSON_SCHEMA_HINT,
+        )
+
+    prompt = _render(cleaned.facts)
+
+    # C5: サイズガード。閾値超過なら structured_facts を上位 K 件に絞り再構築。
+    limit = _config.PHASE_B_PROMPT_CHAR_LIMIT
+    if limit and len(prompt) > limit:
+        truncated_facts = _truncate_facts(cleaned.facts, top_k=_config.PHASE_B_FACTS_TOP_K)
+        new_prompt = _render(truncated_facts)
+        logger.warning(
+            "Phase B prompt サイズガード発火: %d chars > 閾値 %d → "
+            "structured_facts を top %d 件に絞り再構築 → %d chars",
+            len(prompt),
+            limit,
+            _config.PHASE_B_FACTS_TOP_K,
+            len(new_prompt),
+        )
+        prompt = new_prompt
+
+    return prompt
+
+
+# ─── C5: structured_facts truncation (confidence 優先で上位 K 件) ──────────
+_CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def _sort_facts_by_priority(facts: list[ResolvedFact]) -> list[ResolvedFact]:
+    """confidence (high→medium→low) → cross_validated_sources 数 (desc) →
+    source_idx (asc) の優先順でソートする。"""
+    def key(f: ResolvedFact):
+        cvs_count = len(f.raw.get("cross_validated_sources", []) or [])
+        return (
+            _CONFIDENCE_RANK.get(f.confidence, 3),
+            -cvs_count,
+            f.source_idx,
+        )
+
+    return sorted(facts, key=key)
+
+
+def _truncate_facts(facts: CleanedFacts, *, top_k: int) -> CleanedFacts:
+    """各カテゴリの facts を優先順位で top_k 件に絞り、新 CleanedFacts を返す。"""
+    return CleanedFacts(
+        key_numbers=_sort_facts_by_priority(list(facts.key_numbers))[:top_k],
+        key_entities=_sort_facts_by_priority(list(facts.key_entities))[:top_k],
+        surprising_claims=_sort_facts_by_priority(list(facts.surprising_claims))[:top_k],
+        controversies=list(facts.controversies),  # controversies は別データ型、そのまま
     )
 
 
