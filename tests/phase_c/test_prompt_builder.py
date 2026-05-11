@@ -13,13 +13,16 @@ from tests.phase_c._factories import make_show_spec
 
 
 def _common_directives_present(prompt: str) -> bool:
+    # C6 修正後: 旧 directive "[AAA]/[AA]/[A]/[B]" は廃止。
+    # 新 directive: 本文 inline は [src=N] のみ、tier/confidence は本文に書かない。
     return all(
         s in prompt
         for s in [
             "ずんだもん",
             "四国めたん",
             "提供された key_claims から選んで",
-            "[AAA]/[AA]/[A]/[B]",
+            "[src=N]",
+            "tier/confidence は台本本文に書かない",
             "再解釈・改変しないでください",
             '"turns"',
             '"speaker"',
@@ -48,10 +51,14 @@ def test_deep_dive_prompt_focuses_on_target_topic():
     assert target.title in prompt
     assert target.hook in prompt
     assert target.tone in prompt
-    # key_claims が [src=...][TIER][confidence] 形式で描画される
+    # C6 修正後: key_claims inline は [src=N] のみ。tier/confidence は別ブロック。
     for claim in target.key_claims:
-        assert f"[src={claim.source_idx}][{claim.source_tier}][{claim.confidence}]" in prompt
-        assert claim.text in prompt
+        assert f"[src={claim.source_idx}] {claim.text}" in prompt
+        # tier/confidence は metadata block にだけ存在する
+        assert f"src={claim.source_idx}: tier={claim.source_tier}, confidence={claim.confidence}" in prompt
+    # C6 回帰: 旧 inline 形式 [src=N][TIER][confidence] は登場しないこと
+    for claim in target.key_claims:
+        assert f"[src={claim.source_idx}][{claim.source_tier}]" not in prompt
 
 
 def test_deep_dive_prompt_does_not_leak_other_topics_claims():
