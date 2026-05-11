@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from radio_director import config as _config
 from radio_director.logging_setup import attach_file_handler, configure_logging
 from radio_director.models.research_brief import ResearchBrief
 from radio_director.output import (
@@ -36,6 +37,10 @@ from radio_director.phase_d.metadata_generator import _build_prompt as _build_ph
 from radio_director.phase_d.verifier import verify
 
 logger = logging.getLogger(__name__)
+
+
+class QualityGateError(Exception):
+    """Phase D quality gate を retry 後も通過できなかった場合に raise (Step 7 C1)."""
 
 
 def run_pipeline(
@@ -129,7 +134,6 @@ def run_pipeline(
     phase_d_start = time.monotonic()
     verified = verify(script, cleaned, client=client)
     phase_d_elapsed = time.monotonic() - phase_d_start
-    writer.save_json("verified_script.json", verified)
     logger.info(
         "✅ Phase D 完了: title=「%s」 hashtags=%d chapters=%d "
         "references=%d warnings=%d elapsed=%.1fs",
@@ -140,6 +144,64 @@ def run_pipeline(
         len(verified.warnings),
         phase_d_elapsed,
     )
+
+    # ─── Step 7 C1: production gate (soft gate, retry, hard fail) ─────────
+    # matched_ratio が threshold 未満なら Phase B/C を retry (max=N)、
+    # それでも未満なら hard fail し verified_script.failed.json として保存。
+    gate_threshold = _config.PHASE_D_MATCHED_RATIO_GATE
+    retry_enabled = _config.PHASE_D_RETRY_ENABLED
+    retry_max = _config.PHASE_D_RETRY_MAX
+
+    retries = 0
+    while (
+        verified.metrics.matched_ratio < gate_threshold
+        and retry_enabled
+        and retries < retry_max
+    ):
+        retries += 1
+        logger.warning(
+            "🔁 Phase D gate fail (matched_ratio=%.1f%% < %.0f%%) → Phase B/C を retry (%d/%d)",
+            verified.metrics.matched_ratio * 100,
+            gate_threshold * 100,
+            retries,
+            retry_max,
+        )
+        # Phase B/C を再走 (Phase A は decoder で決定論なので再走しない)
+        retry_b_start = time.monotonic()
+        show_spec = plan_show(cleaned, client=client)
+        phase_b_elapsed += time.monotonic() - retry_b_start
+
+        retry_c_start = time.monotonic()
+        script = conduct(show_spec, client=client)
+        phase_c_elapsed += time.monotonic() - retry_c_start
+
+        retry_d_start = time.monotonic()
+        verified = verify(script, cleaned, client=client)
+        phase_d_elapsed += time.monotonic() - retry_d_start
+
+        logger.info(
+            "🔁 Phase D retry %d 完了: matched_ratio=%.1f%% warnings=%d",
+            retries,
+            verified.metrics.matched_ratio * 100,
+            len(verified.warnings),
+        )
+
+    if verified.metrics.matched_ratio < gate_threshold and retry_enabled:
+        # hard fail: diagnostic として別名で保存、verified_script.json は出さない
+        writer.save_json("verified_script.failed.json", verified)
+        logger.error(
+            "❌ Phase D gate を retry %d 回後も通過できず: matched_ratio=%.1f%% < %.0f%%。"
+            " verified_script.failed.json として保存。",
+            retries,
+            verified.metrics.matched_ratio * 100,
+            gate_threshold * 100,
+        )
+        raise QualityGateError(
+            f"matched_ratio {verified.metrics.matched_ratio:.1%} "
+            f"< gate {gate_threshold:.0%} after {retries} retry(ies)"
+        )
+
+    writer.save_json("verified_script.json", verified)
 
     completed_at = datetime.now()
 
