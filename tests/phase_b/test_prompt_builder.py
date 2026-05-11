@@ -140,3 +140,16 @@ def test_prompt_contains_thumbnail_title_directives():
     assert "機械的な切り詰め" in prompt or "機械的切り詰め" in prompt
     # JSON schema hint に "thumbnail_title": キーが含まれる
     assert '"thumbnail_title"' in prompt
+
+
+def test_prompt_contains_topic_exclusivity_rule():
+    """backlog §7-A: 3 topic 間の内容範囲排他性ルールが prompt に明記される。"""
+    cleaned = _decode(make_brief(key_numbers=[kn(1)] * 5))
+    prompt = build_prompt(cleaned)
+    # 排他性の核心: 同じ source_idx の再利用禁止
+    assert "内容範囲が重複しないこと" in prompt
+    assert "同じ事実・数値・" in prompt or "source_idx を別 topic で再利用しない" in prompt
+    # topic 区別の 3 軸が明示される
+    assert "階層" in prompt
+    assert "対比" in prompt
+    assert "深さ" in prompt
