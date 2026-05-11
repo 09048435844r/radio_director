@@ -29,6 +29,7 @@ from radio_director.phase_d.hallucination_detector import (
 )
 from radio_director.phase_d.metadata_generator import generate_metadata
 from radio_director.phase_d.number_extractor import extract_numbers
+from radio_director.phase_d.topic_overlap import check_topic_overlap
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ def verify(
 
     citation_findings, citation_warnings = normalize_citations(script, cleaned_research)
     character_warnings = check_character_voice(script)
+    topic_overlap_warnings = check_topic_overlap(script, cleaned_research)
 
     metadata = generate_metadata(
         script,
@@ -74,6 +76,7 @@ def verify(
         + needs_review_warnings
         + citation_warnings
         + character_warnings
+        + topic_overlap_warnings
     )
 
     logger.info(

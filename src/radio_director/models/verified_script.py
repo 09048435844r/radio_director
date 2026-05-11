@@ -32,6 +32,7 @@ WarningCode = Literal[
     "needs_review_used",
     "wrong_speaker_voice",
     "character_name_corruption",
+    "topic_overlap_warning",
 ]
 
 

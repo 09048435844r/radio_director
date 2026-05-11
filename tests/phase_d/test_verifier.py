@@ -143,3 +143,40 @@ def test_verify_propagates_character_warnings():
     verified = verify(script, cleaned, client=client)
     codes = [w.code for w in verified.warnings]
     assert "wrong_speaker_voice" in codes
+
+
+def test_verify_propagates_topic_overlap_warning():
+    """backlog §7-B: 3 topic が同一 source_idx ばかりを共有する場合に
+    verify() の集約 warnings に topic_overlap_warning が含まれる。"""
+    from radio_director.models.show_spec import Claim, ShowSpec, TopicSpec
+
+    cleaned = make_cleaned_research()
+    # 全 3 topic が source_idx=1 のみを共有 (Jaccard=1.0、病的重複)
+    overlap_topics = [
+        TopicSpec(
+            title=f"t{i}",
+            hook="hook",
+            key_claims=[
+                Claim(text=f"c{i}", source_idx=1, source_tier="AAA", confidence="medium")
+            ],
+            tone="解説",
+            estimated_turns=14,
+        )
+        for i in range(3)
+    ]
+    show = ShowSpec(
+        title="テスト",
+        thumbnail_title="テスト",
+        hook="hook",
+        angle="angle",
+        arc="arc",
+        tone="tone",
+        topics=overlap_topics,
+        conclusion_message="まとめ",
+    )
+    script = make_script(show_spec=show)
+    client = FakeLLMClient(_METADATA_RESPONSE)
+
+    verified = verify(script, cleaned, client=client)
+    codes = [w.code for w in verified.warnings]
+    assert "topic_overlap_warning" in codes
