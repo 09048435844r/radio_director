@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 
+from radio_director import config as _config
 from radio_director.models.cleaned_research import CleanedResearch
 from radio_director.models.script import Script
 from radio_director.models.verified_script import (
@@ -56,13 +57,20 @@ def verify(
         client=client,
     )
 
+    # C4 (Step 7): PHASE_D_UNMATCHED_AS_FP_CANDIDATE=True なら unmatched 全件を
+    # fp_candidate に積む (旧: highly_specific_unmatched と同値)。
+    if _config.PHASE_D_UNMATCHED_AS_FP_CANDIDATE:
+        fp_candidates = halluc_stats.unmatched
+    else:
+        fp_candidates = halluc_stats.highly_specific_unmatched
+
     metrics = VerifiedScriptMetrics(
         total_numbers_extracted=halluc_stats.total,
         matched_to_structured_facts=halluc_stats.matched,
         matched_ratio=halluc_stats.matched_ratio,
         highly_specific_count=halluc_stats.highly_specific_count,
         highly_specific_unmatched=halluc_stats.highly_specific_unmatched,
-        false_positive_candidates=halluc_stats.highly_specific_unmatched,
+        false_positive_candidates=fp_candidates,
         citation_tags_total=len(citation_findings),
         citation_tags_normalized=sum(
             1 for c in citation_findings if c.canonical != c.raw

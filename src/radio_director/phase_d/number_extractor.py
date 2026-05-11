@@ -4,9 +4,16 @@
 （コンマ区切り、漢数字単位、OR/HR/RR 表記）に対応するよう拡張。
 
 highly_specific 判定は仕様 §3.1.1 / 研究側 _is_highly_specific と同等基準で
-ゼロベース実装する:
-  1. 小数 3 桁以上 (例: 0.207, 23.847)
-  2. 100 万以上の整数で末尾 ≠ 000 (例: 2,847,193)
+ゼロベース実装する。
+
+C4 (Step 7): 旧閾値 (小数3桁以上 OR 100万以上の整数で末尾非000) では
+n=1,250 / 15% / OR=0.85 / 95%CI 等の現実的な医学・統計数値が全て素通りし
+false_positive_candidates が常にゼロだった事象を修正。
+閾値・分類基準を radio_director.config に外出しし、デフォルトで:
+  - MIN_INTEGER = 100 (旧 1,000,000)
+  - MIN_DECIMAL_PLACES = 1 (旧 3)
+  - INCLUDE_PERCENT = True (% を含む値は specific 扱い)
+  - INCLUDE_STATISTIC_NOTATION = True (n=/OR=/p</CI 等は specific 扱い)
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from radio_director import config as _config
 from radio_director.models.script import Script
 
 _NUMBER_PATTERN = re.compile(
@@ -98,17 +106,39 @@ def _extract_from_text(text: str, segment_id: str) -> list[ExtractedNumber]:
     return out
 
 
+# C4: 統計量表記 (n=, OR=, HR=, RR=, SMD=, p<, CI 等)
+_STATISTIC_NOTATION_PATTERN = re.compile(
+    r"(?:OR|HR|RR|SMD|n\s*[=＝]|p\s*[<>=]|CI)",
+    flags=re.IGNORECASE,
+)
+
+
 def is_highly_specific(value: str) -> bool:
-    """仕様 §3.1.1 と同等の判定:
-    - 小数 3 桁以上 (高精度数値)
-    - 100 万以上の整数で末尾が 000 でない (細かい集計値)
+    """値が「具体的・統計的」かを判定する (C4 で拡張済み、閾値は config 外出し)。
+
+    判定基準 (config 既定値):
+    1. % を含む値 (例: "15%", "95%CI") → True
+    2. 統計量表記 (n=, OR=, HR=, RR=, SMD=, p<, CI) を含む → True
+    3. 小数点以下 N 桁以上 (例: "0.12" / "0.207" / "23.847") → True
+    4. M 以上の整数 (例: "100", "1,250") → True
     """
     if not isinstance(value, str) or not value:
         return False
     cleaned = value.replace(",", "").replace(" ", "").replace("　", "").strip()
 
+    # C4: percent 表現は specific 扱い (config 制御)
+    if _config.PHASE_D_HS_INCLUDE_PERCENT and "%" in cleaned:
+        return True
+
+    # C4: 統計量表記 (n=/OR=/p<等) は specific 扱い (config 制御)
+    if (
+        _config.PHASE_D_HS_INCLUDE_STATISTIC_NOTATION
+        and _STATISTIC_NOTATION_PATTERN.search(cleaned)
+    ):
+        return True
+
     m = _HIGHLY_SPECIFIC_DECIMAL.match(cleaned)
-    if m and len(m.group(1)) >= 3:
+    if m and len(m.group(1)) >= _config.PHASE_D_HS_MIN_DECIMAL_PLACES:
         return True
 
     m = _HIGHLY_SPECIFIC_INT.match(cleaned)
@@ -117,7 +147,7 @@ def is_highly_specific(value: str) -> bool:
             n = int(m.group(1))
         except ValueError:
             return False
-        if n >= 1_000_000 and n % 1000 != 0:
+        if n >= _config.PHASE_D_HS_MIN_INTEGER:
             return True
 
     return False

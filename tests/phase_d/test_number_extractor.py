@@ -57,11 +57,23 @@ def test_highly_specific_decimal_3():
 
 
 def test_highly_specific_decimal_2():
-    assert is_highly_specific("0.12") is False
+    """C4 (Step 7): MIN_DECIMAL_PLACES=1 (default) のもとで '0.12' は specific 扱い。
+
+    旧 (Step 7 以前) は 3 桁以上のみ specific だったため False を期待していたが、
+    現実の医学・統計数値 (OR=0.85 等) が全て素通りする問題があり、
+    閾値を 1 に引き下げた。
+    """
+    assert is_highly_specific("0.12") is True
 
 
 def test_highly_specific_million_with_round_suffix():
-    assert is_highly_specific("2,847,000") is False
+    """C4 (Step 7): MIN_INTEGER=100 (default) のもとで '2,847,000' も specific 扱い。
+
+    旧 (Step 7 以前) は「末尾 000 でない 100 万以上の整数」のみ specific
+    だったため False を期待していたが、現実の n=1,250 / 100名 等が
+    全て素通りする問題があり、末尾条件を撤廃し閾値を 100 に引き下げた。
+    """
+    assert is_highly_specific("2,847,000") is True
 
 
 def test_highly_specific_million_with_irregular_suffix():
@@ -69,7 +81,8 @@ def test_highly_specific_million_with_irregular_suffix():
 
 
 def test_highly_specific_below_million():
-    assert is_highly_specific("847,193") is False  # 100万未満
+    """C4 (Step 7): MIN_INTEGER=100 のもとで '847,193' も specific 扱い。"""
+    assert is_highly_specific("847,193") is True
 
 
 def test_extract_numbers_walks_all_segments():
