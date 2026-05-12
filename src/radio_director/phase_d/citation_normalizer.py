@@ -27,6 +27,9 @@ _FULL_TAG_RE = re.compile(
 _SRC_THEN_TIER_RE = re.compile(
     rf"\[(?P<src>\d+)\]\[(?P<tier>{_TIER_TOKEN})\]"
 )
+# C6 (Step 7): Phase C プロンプトを inline [src=N] のみに簡素化したため、
+# [src=N] 単独形式も認識する。tier は cleaned_research.sources から逆引きする。
+_SRC_ONLY_RE = re.compile(r"\[src\s*=\s*(?P<src>\d+)\]")
 _TIER_ONLY_RE = re.compile(rf"\[(?P<tier>{_TIER_TOKEN})\]")
 
 
@@ -83,6 +86,44 @@ def _scan_text(text, segment_id, sources, warnings):
                     location=segment_id,
                 )
             )
+
+    # C6 (Step 7): [src=N] 単独形式 (新 Phase C inline 形式)
+    for m in _SRC_ONLY_RE.finditer(text):
+        span = m.span()
+        if any(s <= span[0] < e for s, e in consumed_spans):
+            continue  # 既に [src=N][TIER] として消費済み
+        consumed_spans.append(span)
+        src = int(m.group("src"))
+        # tier は sources から逆引き
+        if 1 <= src <= len(sources):
+            tier: DomainTier = sources[src - 1].domain_tier  # type: ignore[assignment]
+            consistent = True
+        else:
+            # 範囲外 src: warning を出す
+            warnings.append(
+                __import__(
+                    "radio_director.models.verified_script", fromlist=["VerificationWarning"]
+                ).VerificationWarning(
+                    code="unknown_source_idx",
+                    message=(
+                        f"出典タグの src={src} が research_sources の範囲外 (1..{len(sources)})"
+                    ),
+                    location=segment_id,
+                )
+            )
+            tier = "B"  # fallback
+            consistent = False
+        canonical = f"[src={src}][{tier}]"
+        found.append(
+            CitationFinding(
+                raw=m.group(0),
+                canonical=canonical,
+                source_idx=src,
+                tier=tier,
+                is_consistent=consistent,
+                location=segment_id,
+            )
+        )
 
     for m in _TIER_ONLY_RE.finditer(text):
         span = m.span()
