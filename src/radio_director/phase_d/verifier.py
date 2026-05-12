@@ -30,6 +30,9 @@ from radio_director.phase_d.hallucination_detector import (
 )
 from radio_director.phase_d.metadata_generator import generate_metadata
 from radio_director.phase_d.number_extractor import extract_numbers
+from radio_director.phase_d.source_attribution_validator import (
+    check_source_attribution,
+)
 from radio_director.phase_d.topic_overlap import check_topic_overlap
 
 logger = logging.getLogger(__name__)
@@ -49,6 +52,10 @@ def verify(
     citation_findings, citation_warnings = normalize_citations(script, cleaned_research)
     character_warnings = check_character_voice(script)
     topic_overlap_warnings = check_topic_overlap(script, cleaned_research)
+    # C3 (Step 8): ShowSpec.key_claims の source_idx 整合性を検証
+    source_attribution_warnings = check_source_attribution(
+        script.show_spec, cleaned_research
+    )
 
     metadata = generate_metadata(
         script,
@@ -85,6 +92,7 @@ def verify(
         + citation_warnings
         + character_warnings
         + topic_overlap_warnings
+        + source_attribution_warnings
     )
 
     logger.info(

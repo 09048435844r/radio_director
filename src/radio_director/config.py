@@ -45,3 +45,16 @@ PHASE_D_HS_INCLUDE_STATISTIC_NOTATION: bool = True
 # 現状 false_positive_candidates は highly_specific_unmatched と同じだが、
 # このフラグを有効化すると unmatched 全件が candidate になる。
 PHASE_D_UNMATCHED_AS_FP_CANDIDATE: bool = True
+
+
+# ─── Phase D (C3 / Step 8): source attribution validator ──────────────────
+# Phase B が生成した key_claims の source_idx が「実際にその数値・固有名詞を
+# 含むソース」を指しているかを deterministic にチェック。
+# Step 7 で C2 が research_content の直接転用は塞いだが、Phase B が
+# 当てずっぽうで source_idx を割り当てる挙動 (barefoot で ZICO Trust に医学
+# 統計を帰属) を deterministic に検出する。
+C3_ENABLE: bool = True
+# 数値の近似マッチ許容範囲 (%) — "15%" vs "14.5%" を整合とみなす
+C3_NUMBER_TOLERANCE_PCT: float = 5.0
+# 固有名詞のミスマッチは warning にするか (False = 数値のみ judge、緩い)
+C3_REQUIRE_ENTITY_MATCH: bool = False
