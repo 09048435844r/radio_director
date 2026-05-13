@@ -58,3 +58,35 @@ C3_ENABLE: bool = True
 C3_NUMBER_TOLERANCE_PCT: float = 5.0
 # 固有名詞のミスマッチは warning にするか (False = 数値のみ judge、緩い)
 C3_REQUIRE_ENTITY_MATCH: bool = False
+
+
+# ─── Phase D (P1 / Step 8 v2): 数値マッチャーのトークン化正規化 ──────────
+# "1000 億" (script) と "1000億パラメータ" (structured_facts) のような
+# スペース・単位の違いだけで unmatched 判定される事象を 2026-05-13 exo 本運用
+# で観測。比較前に全角→半角・スペース除去・カンマ除去・日本語単位剥がしを
+# 両側に適用する。
+PHASE_D_NUMBER_NORMALIZATION_ENABLED: bool = True
+# 比較時に剥がす日本語単位の語 (% / 倍 は単位として保持、これらは「数の名前」)
+PHASE_D_NUMBER_STRIP_UNITS: tuple[str, ...] = (
+    "パラメータ",
+    "件",
+    "名",
+    "個",
+    "台",
+    "本",
+    "匹",
+    "部",
+    "回",
+    "箇所",
+    "施設",
+    "種類",
+    "年",
+    "月",
+    "日",
+    "時間",
+    "分",
+    "秒",
+    "円",
+    "ドル",
+    "ユーロ",
+)
