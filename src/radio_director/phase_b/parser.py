@@ -24,6 +24,20 @@ class ShowSpecParseError(Exception):
 
 
 def parse_show_spec(raw: str) -> ShowSpec:
+    """LLM 出力を ShowSpec に変換する (validation 込み)。"""
+    obj = parse_show_spec_dict(raw)
+    try:
+        return ShowSpec.model_validate(obj)
+    except ValidationError as exc:
+        raise ShowSpecParseError(f"ShowSpec validation failed: {exc}") from exc
+
+
+def parse_show_spec_dict(raw: str) -> dict:
+    """LLM 出力を dict に変換するが、Pydantic validation はしない (Step 9 補助)。
+
+    planner が dict 段階で thumbnail_title 等を deterministic に補正できるよう、
+    validation の前段を切り出した版。
+    """
     cleaned = _strip_code_fences(_strip_think_tags(raw)).strip()
 
     obj = _try_load_json(cleaned)
@@ -43,11 +57,7 @@ def parse_show_spec(raw: str) -> ShowSpec:
         raise ShowSpecParseError(
             f"トップレベルが JSON オブジェクトではありません (type={type(obj).__name__})"
         )
-
-    try:
-        return ShowSpec.model_validate(obj)
-    except ValidationError as exc:
-        raise ShowSpecParseError(f"ShowSpec validation failed: {exc}") from exc
+    return obj
 
 
 def _strip_think_tags(text: str) -> str:

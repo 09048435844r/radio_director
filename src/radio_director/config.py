@@ -60,6 +60,18 @@ C3_NUMBER_TOLERANCE_PCT: float = 5.0
 C3_REQUIRE_ENTITY_MATCH: bool = False
 
 
+# ─── Phase B (Step 9 partial / postscript): planner の thumbnail_title 安定化 ─
+# DGX (Step 7) と exo (Step 8 v1/v2) で Phase B が thumbnail_title 15 字制約を
+# 確率的に破って fail する事象を観測 (backlog §14.1)。max_attempts を増やし、
+# retry 時に失敗理由を prompt に inline し、最終 LLM 失敗時は deterministic に
+# 末尾切り詰めする 3 層構造で完走率を上げる。
+PHASE_B_PLANNER_MAX_ATTEMPTS: int = 3
+PHASE_B_RETRY_INCLUDE_FAILURE_REASON: bool = True
+PHASE_B_THUMBNAIL_TITLE_TRUNCATE_ENABLED: bool = True
+# thumbnail_title の最大長 (ShowSpec.model 側の制約と一致させる)
+PHASE_B_THUMBNAIL_TITLE_MAX_LENGTH: int = 15
+
+
 # ─── Phase D (P1 / Step 8 v2): 数値マッチャーのトークン化正規化 ──────────
 # "1000 億" (script) と "1000億パラメータ" (structured_facts) のような
 # スペース・単位の違いだけで unmatched 判定される事象を 2026-05-13 exo 本運用

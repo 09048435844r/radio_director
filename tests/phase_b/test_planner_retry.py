@@ -61,11 +61,19 @@ def test_retry_then_succeeds():
     assert client.calls == 2
 
 
-def test_two_consecutive_failures_raise():
-    """連続失敗で ShowSpecParseError 伝播。"""
+def test_two_consecutive_failures_raise(monkeypatch):
+    """連続失敗で ShowSpecParseError 伝播 (truncate fallback OFF)。
+
+    Step 9 postscript で max_attempts default を 2→3 に増やし、truncate fallback
+    を導入したため、本テストの本来の意図 (「default max_attempts でも失敗ケースで
+    raise する」) を保持するには両者を明示 OFF する必要がある (Append-Only 例外、
+    バグ的旧挙動を asserting していたケースの update)。
+    """
+    from radio_director import config
+    monkeypatch.setattr(config, "PHASE_B_THUMBNAIL_TITLE_TRUNCATE_ENABLED", False)
     client = FakeLLMClient([_bad_thumbnail_payload(), _bad_thumbnail_payload()])
     with pytest.raises(ShowSpecParseError):
-        plan_show(_cleaned(), client=client)
+        plan_show(_cleaned(), client=client, max_attempts=2)
     assert client.calls == 2
 
 
