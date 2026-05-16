@@ -9,3 +9,4 @@ venv/
 /output/
 *.log
 .pytest_cache/
+bot/.env

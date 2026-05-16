@@ -1,0 +1,269 @@
+"""Discord bot エントリーポイント。
+
+スマートフォンの Discord アプリから /run <theme> を叩くと、
+research_pipeline → radio_director を順次実行し進捗を投稿する。
+
+セキュリティ: ALLOWED_USER_ID のみ /run /status を実行可能。
+並列実行は排他: 1 タスク実行中は新しい /run を弾く。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import sys
+import traceback
+from pathlib import Path
+
+# bot/ ディレクトリを sys.path に追加 (config / runner を相対 import)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import discord
+from discord import app_commands
+
+from config import BotConfig, load_config
+from runner import RunResult, run_full_pipeline
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
+log = logging.getLogger("bot")
+
+
+RECOMMENDED_THEMES = [
+    "腸内細菌と免疫力の関係",
+    "良質な睡眠を得るための科学的方法",
+    "マインドフルネス瞑想の効果",
+    "コラーゲンペプチドの効果と科学的根拠",
+    "発酵食品が健康に与える影響",
+    "プロテイン摂取と筋肉合成のメカニズム",
+    "ビタミンDと免疫機能",
+    "コーヒーの健康効果と注意点",
+]
+
+
+class RadioBot(discord.Client):
+    def __init__(self, cfg: BotConfig) -> None:
+        intents = discord.Intents.default()
+        super().__init__(intents=intents)
+        self.cfg = cfg
+        self.tree = app_commands.CommandTree(self)
+        self._current_task: asyncio.Task | None = None
+        self._current_theme: str | None = None
+
+    async def setup_hook(self) -> None:
+        # スラッシュコマンドをグローバル登録 (反映に最大 1 時間)。
+        # 開発中の即時反映が必要なら、ギルド単位で sync する手もあるが
+        # ここではシンプルにグローバル sync に揃える。
+        synced = await self.tree.sync()
+        log.info("slash commands synced: %d", len(synced))
+
+    async def on_ready(self) -> None:
+        log.info("logged in as %s (id=%s)", self.user, getattr(self.user, "id", "?"))
+        log.info("allowed_user_id=%s", self.cfg.allowed_user_id)
+
+    @property
+    def is_running_task(self) -> bool:
+        return self._current_task is not None and not self._current_task.done()
+
+
+# ─── helpers ──────────────────────────────────────────────────
+
+def _result_embed(result: RunResult) -> discord.Embed:
+    if result.success:
+        title = "✅ パイプライン完了"
+        color = discord.Color.green()
+    else:
+        title = "❌ パイプライン失敗"
+        color = discord.Color.red()
+
+    minutes, seconds = divmod(int(result.elapsed_sec), 60)
+    embed = discord.Embed(title=title, color=color)
+    embed.add_field(name="theme", value=result.theme[:1024] or "(unknown)", inline=False)
+    embed.add_field(name="elapsed", value=f"{minutes}分{seconds}秒", inline=True)
+
+    if result.brief_path:
+        embed.add_field(name="brief", value=f"`{result.brief_path.name}`", inline=False)
+    if result.run_dir:
+        embed.add_field(name="run_dir", value=f"`{result.run_dir.name}`", inline=False)
+
+    if result.success and result.metrics:
+        m = result.metrics
+        ratio = m.get("matched_ratio", 0.0)
+        pct = f"{ratio * 100:.1f}%"
+        embed.add_field(name="title", value=m.get("title", "")[:256], inline=False)
+        embed.add_field(
+            name="matched_ratio",
+            value=f"**{pct}** ({m.get('matched_to_structured_facts',0)}/"
+                  f"{m.get('total_numbers_extracted',0)})",
+            inline=True,
+        )
+        embed.add_field(
+            name="citations",
+            value=f"{m.get('citation_tags_normalized',0)}/{m.get('citation_tags_total',0)}",
+            inline=True,
+        )
+        embed.add_field(
+            name="warnings",
+            value=str(m.get("warnings_count", 0)),
+            inline=True,
+        )
+        embed.add_field(
+            name="references",
+            value=str(m.get("references_count", 0)),
+            inline=True,
+        )
+        embed.add_field(
+            name="chapters",
+            value=str(m.get("chapters_count", 0)),
+            inline=True,
+        )
+        embed.add_field(
+            name="fp_candidates",
+            value=str(m.get("false_positive_candidates", 0)),
+            inline=True,
+        )
+
+    if result.error:
+        embed.add_field(name="error", value=result.error[:1024], inline=False)
+
+    return embed
+
+
+async def _pipeline_worker(
+    bot: RadioBot,
+    channel: discord.abc.Messageable,
+    theme: str,
+    mode: str,
+) -> None:
+    """バックグラウンドでパイプラインを回し、進捗と結果を channel に投稿する。"""
+    try:
+        async for kind, payload in run_full_pipeline(bot.cfg, theme, mode=mode):
+            if kind == "progress":
+                await channel.send(payload["message"][:2000])
+            elif kind == "complete":
+                result: RunResult = payload["result"]
+                await channel.send(embed=_result_embed(result))
+    except Exception:
+        tb = traceback.format_exc()
+        log.exception("pipeline worker crashed")
+        # Discord メッセージ上限を考慮して短く切る
+        await channel.send(
+            f"❌ 内部例外でパイプライン中断:\n```\n{tb[-1500:]}\n```"
+        )
+    finally:
+        bot._current_theme = None
+
+
+# ─── commands ─────────────────────────────────────────────────
+
+def _is_allowed(interaction: discord.Interaction, cfg: BotConfig) -> bool:
+    return interaction.user.id == cfg.allowed_user_id
+
+
+def register_commands(bot: RadioBot) -> None:
+    cfg = bot.cfg
+
+    @bot.tree.command(
+        name="run",
+        description="リサーチパイプラインを実行 (35〜55 分かかります)",
+    )
+    @app_commands.describe(
+        theme="テーマ (30〜100 文字推奨)",
+        mode="リサーチモード (lecture/debate/voices/trivia/weekly_digest)",
+    )
+    async def run_cmd(
+        interaction: discord.Interaction,
+        theme: str,
+        mode: str = "lecture",
+    ) -> None:
+        if not _is_allowed(interaction, cfg):
+            await interaction.response.send_message(
+                "🔒 権限がありません。", ephemeral=True
+            )
+            return
+
+        valid_modes = {"lecture", "debate", "voices", "trivia", "weekly_digest"}
+        if mode not in valid_modes:
+            await interaction.response.send_message(
+                f"❌ mode は次から選択: {', '.join(sorted(valid_modes))}",
+                ephemeral=True,
+            )
+            return
+
+        if bot.is_running_task:
+            await interaction.response.send_message(
+                f"⏳ 既に実行中です (theme=「{bot._current_theme}」)。"
+                " 終わるまでお待ちください。",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            f"🚀 開始: 「{theme}」 (mode={mode})\n"
+            f"進捗はこのチャンネルに順次投稿します。"
+        )
+
+        bot._current_theme = theme
+        channel = interaction.channel
+        if channel is None:
+            await interaction.followup.send(
+                "❌ チャンネルが取得できないため中止します。", ephemeral=True
+            )
+            bot._current_theme = None
+            return
+
+        bot._current_task = asyncio.create_task(
+            _pipeline_worker(bot, channel, theme, mode)
+        )
+
+    @bot.tree.command(name="status", description="実行中のパイプラインを確認")
+    async def status_cmd(interaction: discord.Interaction) -> None:
+        if not _is_allowed(interaction, cfg):
+            await interaction.response.send_message(
+                "🔒 権限がありません。", ephemeral=True
+            )
+            return
+        if bot.is_running_task:
+            await interaction.response.send_message(
+                f"⏳ 実行中: theme=「{bot._current_theme}」", ephemeral=True
+            )
+        else:
+            await interaction.response.send_message("💤 アイドル中", ephemeral=True)
+
+    @bot.tree.command(name="themes", description="推奨テーマ一覧を表示")
+    async def themes_cmd(interaction: discord.Interaction) -> None:
+        lines = "\n".join(f"• {t}" for t in RECOMMENDED_THEMES)
+        await interaction.response.send_message(
+            f"**推奨テーマ (Step 7-10b 安全象限 §11.5):**\n{lines}",
+            ephemeral=True,
+        )
+
+
+def main() -> int:
+    try:
+        cfg = load_config()
+    except RuntimeError as e:
+        print(f"設定エラー: {e}", file=sys.stderr)
+        return 1
+
+    bot = RadioBot(cfg)
+    register_commands(bot)
+
+    try:
+        bot.run(cfg.discord_token, log_handler=None)
+    except discord.LoginFailure:
+        print("❌ Discord ログイン失敗 (token を確認)", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("⏹ 停止 (Ctrl+C)", file=sys.stderr)
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

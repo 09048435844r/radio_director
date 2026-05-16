@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS LaunchAgent for the Discord bot.
+
+  インストール手順:
+    cp ~/radio_director/bot/com.tada.radio-bot.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.tada.radio-bot.plist
+
+  停止 / 再起動:
+    launchctl unload   ~/Library/LaunchAgents/com.tada.radio-bot.plist
+    launchctl load     ~/Library/LaunchAgents/com.tada.radio-bot.plist
+    launchctl kickstart -k gui/$(id -u)/com.tada.radio-bot   # 推奨 (再起動)
+
+  ログ:
+    ~/radio_director/bot/logs/stdout.log
+    ~/radio_director/bot/logs/stderr.log
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tada.radio-bot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/tada/radio_director/bot/start_bot.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/tada/radio_director/bot</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/tada/radio_director/bot/logs/stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/tada/radio_director/bot/logs/stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
