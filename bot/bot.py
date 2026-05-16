@@ -147,7 +147,23 @@ async def _pipeline_worker(
                 await channel.send(payload["message"][:2000])
             elif kind == "complete":
                 result: RunResult = payload["result"]
-                await channel.send(embed=_result_embed(result))
+                files: list[discord.File] = []
+                if result.brief_path and result.brief_path.is_file():
+                    files.append(
+                        discord.File(str(result.brief_path), filename="research_brief.json")
+                    )
+                if result.run_dir:
+                    script_ok = result.run_dir / "verified_script.json"
+                    script_failed = result.run_dir / "verified_script.failed.json"
+                    if script_ok.is_file():
+                        files.append(
+                            discord.File(str(script_ok), filename="verified_script.json")
+                        )
+                    elif script_failed.is_file():
+                        files.append(
+                            discord.File(str(script_failed), filename="verified_script.failed.json")
+                        )
+                await channel.send(embed=_result_embed(result), files=files)
     except Exception:
         tb = traceback.format_exc()
         log.exception("pipeline worker crashed")
@@ -234,6 +250,12 @@ def register_commands(bot: RadioBot) -> None:
             )
         else:
             await interaction.response.send_message("💤 アイドル中", ephemeral=True)
+
+    @bot.tree.command(name="myid", description="自分の Discord User ID を返す (権限チェックなし)")
+    async def myid_cmd(interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            f"あなたのUser ID: {interaction.user.id}", ephemeral=True
+        )
 
     @bot.tree.command(name="themes", description="推奨テーマ一覧を表示")
     async def themes_cmd(interaction: discord.Interaction) -> None:
