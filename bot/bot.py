@@ -10,7 +10,9 @@ research_pipeline → radio_director を順次実行し進捗を投稿する。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -73,7 +75,101 @@ class RadioBot(discord.Client):
 
 # ─── helpers ──────────────────────────────────────────────────
 
-def _result_embed(result: RunResult) -> discord.Embed:
+# citation タグ ([src=3] 等) を読み上げ用テキストから除去する (backlog §14.4)
+_SRC_TAG_RE = re.compile(r"\s*\[src=\d+\]")
+
+
+def _strip_src_tags(text: str) -> str:
+    return _SRC_TAG_RE.sub("", text)
+
+
+def _load_verified_script(result: RunResult) -> dict | None:
+    """run_dir/verified_script.json を読み込む。無ければ None (gate fail 等)。"""
+    if not result.run_dir:
+        return None
+    vs_path = result.run_dir / "verified_script.json"
+    if not vs_path.is_file():
+        return None
+    try:
+        return json.loads(vs_path.read_text(encoding="utf-8"))
+    except Exception:
+        log.warning("verified_script.json 読込失敗: %s", vs_path)
+        return None
+
+
+def _quality_check_value(result: RunResult, script: dict | None) -> str:
+    """matched_ratio / fp_candidates / citation 整合性を信号機判定する。
+
+    matched_ratio・false_positive_candidates は RunResult.metrics から、
+    citation_tags_inconsistent は runner._extract_metrics が拾わないため
+    verified_script.json の metrics ブロックから直接読む。
+    """
+    m = result.metrics or {}
+    ratio = float(m.get("matched_ratio", 0.0) or 0.0)
+    fp = int(m.get("false_positive_candidates", 0) or 0)
+    cit_inc = 0
+    if script:
+        cit_inc = int((script.get("metrics") or {}).get("citation_tags_inconsistent", 0) or 0)
+
+    lines: list[str] = []
+    statuses: list[str] = []
+
+    if ratio >= 0.50:
+        lines.append("✅ matched_ratio 良好")
+        statuses.append("ok")
+    elif ratio >= 0.35:
+        lines.append("⚠️ matched_ratio やや低め (目視推奨)")
+        statuses.append("warn")
+    else:
+        lines.append("❌ matched_ratio 低 (要確認)")
+        statuses.append("ng")
+
+    if fp <= 15:
+        lines.append("✅ 数値の信頼性 良好")
+        statuses.append("ok")
+    elif fp <= 30:
+        lines.append(f"⚠️ 数値警告 {fp}件 (放送前に目視推奨)")
+        statuses.append("warn")
+    else:
+        lines.append(f"❌ 数値警告 {fp}件 (要目視確認)")
+        statuses.append("ng")
+
+    if cit_inc == 0:
+        lines.append("✅ 引用構造 正常")
+        statuses.append("ok")
+    else:
+        lines.append(f"❌ 引用エラー {cit_inc}件")
+        statuses.append("ng")
+
+    if "ng" in statuses:
+        verdict = "🔴 要確認"
+    elif "warn" in statuses:
+        verdict = "🟡 放送前に確認を"
+    else:
+        verdict = "🟢 品質良好"
+    lines.append(f"\n→ **{verdict}**")
+    return "\n".join(lines)[:1024]
+
+
+def _script_sample_message(script: dict) -> str | None:
+    """segments[1] の turns[0:3] を [src=N] 除去してサンプル表示する。"""
+    segments = ((script.get("script") or {}).get("segments")) or []
+    if len(segments) < 2:
+        return None
+    seg = segments[1]
+    seg_title = seg.get("title") or "(no title)"
+    turns = seg.get("turns") or []
+    if not turns:
+        return None
+    lines = [f"📄 台本サンプル ({seg_title})"]
+    for turn in turns[:3]:
+        spk = turn.get("speaker", "?")
+        txt = _strip_src_tags(turn.get("text", "")).strip()
+        lines.append(f"[{spk}] {txt[:100]}...")
+    return "\n".join(lines)[:2000]
+
+
+def _result_embed(result: RunResult, script: dict | None = None) -> discord.Embed:
     if result.success:
         title = "✅ パイプライン完了"
         color = discord.Color.green()
@@ -127,6 +223,11 @@ def _result_embed(result: RunResult) -> discord.Embed:
             value=str(m.get("false_positive_candidates", 0)),
             inline=True,
         )
+        embed.add_field(
+            name="🔍 品質チェック",
+            value=_quality_check_value(result, script),
+            inline=False,
+        )
 
     if result.error:
         embed.add_field(name="error", value=result.error[:1024], inline=False)
@@ -163,7 +264,14 @@ async def _pipeline_worker(
                         files.append(
                             discord.File(str(script_failed), filename="verified_script.failed.json")
                         )
-                await channel.send(embed=_result_embed(result), files=files)
+                script = _load_verified_script(result)
+                await channel.send(
+                    embed=_result_embed(result, script), files=files
+                )
+                if result.success and script is not None:
+                    sample = _script_sample_message(script)
+                    if sample:
+                        await channel.send(sample)
     except Exception:
         tb = traceback.format_exc()
         log.exception("pipeline worker crashed")
